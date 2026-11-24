@@ -166,6 +166,9 @@ class ConfigManager:
             self.discord_webhook_url = str(notifications.get('discord_webhook_url', '')).strip()
             self.telegram_bot_token = str(notifications.get('telegram_bot_token', '')).strip()
             self.telegram_chat_id = str(notifications.get('telegram_chat_id', '')).strip()
+            if not self.discord_webhook_url:
+                #Backwards compat: older configs kept the webhook URL under [MENU]
+                self.discord_webhook_url = str(menu.get('discord_webhook_url', '')).strip()
         except KeyError as e:
             self.err_dialog(f'[E] Err -> {e} key missing | Outdated config file.')
         except (MissingRequiredFieldError, 
