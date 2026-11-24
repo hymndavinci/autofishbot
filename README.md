@@ -15,9 +15,6 @@ Fork of [thejoabo/autofishbot](https://github.com/thejoabo/autofishbot) (upstrea
 - External notifications via Discord webhook or Telegram
 - Proxy support (HTTPS), gateway auto-reconnect with backoff
 
-## Demo
-![demo](assets/images/demo.gif)
-
 ## Requirements
 - Python [3.10.6](https://www.python.org/downloads/release/python-3106/) or [later versions](https://www.python.org/downloads/)
 - [Git](https://git-scm.com/downloads) (optional)
@@ -132,12 +129,6 @@ The methodology is quite straight forward, when a new captcha is detected:
 If all tests fail, a request to regenerate the captcha will be sent (up to 3 times). If the bot, ultimately, fails to solve all captchas, it will wait until you solve it manually.
 
 Keep in mind that the captcha detection method is not flawless, unexpected events can cause some unusual behavior that could influence detection accuracy. Therefore, it should not be left alone without monitoring for longer periods of time.
-### Demo (normal)
-![captcha-demo](assets/images/captcha-demo.gif)
-
-### Demo (with regen)
-![captcha-demo-wrong-code](assets/images/captcha-with-regen.gif)
-
 ### HOW DO I GET MY **FREE** KEY ?
 
 All you need to do is use [any](https://temp-mail.io/en) email to get it here: https://ocr.space/ocrapi/freekey.
