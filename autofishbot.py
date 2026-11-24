@@ -178,13 +178,13 @@ class Receiver:
                 self.captcha.reset()
 
             if self.captcha.detected and not self.captcha.regenerating:
-                if self.message.content == 'You may now continue.':
+                if 'You may now continue' in self.message.text:
                     #Captcha bypassed
                     self.menu.rcv_bypasses += 1
                     self.captcha.reset()
                     self.menu.notify('[*] Captcha bypassed !')
                 else:
-                    if self.message.content.find('Incorrect code') > -1:
+                    if 'Incorrect code' in self.message.text:
                         self.menu.notify('[*] Incorrect code.', NotificationPriority.LOW)
                         continue
                     else:
@@ -471,6 +471,9 @@ if __name__ == "__main__":
         cmd, data = scheduler.commands.worker.data
         session.request(command=cmd, parameters=data)
         sleep(3)
+
+    menu.notify('[*] Autofishbot stopped.')
+    notifier.flush()
 
     session.disconnect()
     exit(f'\n[!] User exited.')

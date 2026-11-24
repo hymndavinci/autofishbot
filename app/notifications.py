@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from queue import Queue, Empty
 from threading import Thread, Lock
+from time import sleep, time
 from requests import post
 
 
@@ -10,9 +11,16 @@ class NotificationManager:
     def __init__(self, config, menu=None):
         self.config = config
         self.menu = menu
+        self.label = '' #Account label prepended to external messages (set after login)
         self.queue = Queue()
         self.started = False
         self.start_lock = Lock()
+
+    def flush(self, timeout: float = 5.0):
+        '''Best-effort wait until queued notifications are delivered (or timeout).'''
+        deadline = time() + timeout
+        while self.queue.unfinished_tasks > 0 and time() < deadline:
+            sleep(0.05)
 
     def start(self):
         with self.start_lock:
@@ -30,7 +38,8 @@ class NotificationManager:
         ):
             return
         self.start()
-        self.queue.put(str(message)[:1800])
+        text = f'[{self.label}] {message}' if self.label else str(message)
+        self.queue.put(text[:1800])
 
     def _deliver(self, message: str):
         webhook = getattr(self.config, "discord_webhook_url", "")

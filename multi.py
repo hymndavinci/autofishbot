@@ -146,7 +146,7 @@ def run_ui(stdscr: curses.window, accounts: list[Account]) -> None:
             if acc.dead and not acc.dead_notified:
                 acc.dead_notified = True
                 acc.menu.is_alive = False
-                acc.menu.notify(f'[E] {acc.error or "a worker thread exited"}', NotificationPriority.VERY_HIGH)
+                acc.menu.notify(f'[E] {acc.error or "a worker thread stopped"}', NotificationPriority.VERY_HIGH)
         if all(acc.dead or not acc.menu.is_alive for acc in accounts):
             return None
 
@@ -232,6 +232,13 @@ if __name__ == '__main__':
                     pass
         if sent:
             sleep(3)
+        for acc in accounts:
+            try:
+                acc.menu.notify('[*] Autofishbot stopped.')
+                if acc.menu.notifier:
+                    acc.menu.notifier.flush()
+            except Exception:
+                pass
         for acc in accounts:
             acc.session.disconnect()
     exit('\n[!] User exited.')

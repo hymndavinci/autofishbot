@@ -342,7 +342,9 @@ class BaseMenu:
         external = any(term in lowered for term in (
             'maximum captcha regens exceeded', 'manual input', 'manual intervention',
             'emerald fish', 'boost purchase', 'buy failed',
-            'connection lost', 'reconnection succeeded', 'reconnection failed'
+            'connection lost', 'reconnection succeeded', 'reconnection failed',
+            'connected to discord', 'autofishbot stopped', 'proxy error',
+            'captcha detected', 'captcha bypassed', 'incorrect code', 'stopped'
         ))
         if external and self.notifier:
             try:

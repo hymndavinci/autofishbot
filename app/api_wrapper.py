@@ -192,6 +192,7 @@ class DiscordWrapper:
     commands: list[dict] = field(repr=False, default_factory=list)
     seq: int = None
     user_id: str = '' #Own account id (taken from the READY event), used to ignore other players' messages
+    username: str = '' #Own account username (taken from the READY event), used as the webhook label
     endpoints: ApiEndpoints = field(init=False, repr=False)
     
     device: str = field(init=False)
@@ -510,6 +511,7 @@ class DiscordWrapper:
             if deserialized.get('t') == 'READY':
                 try:
                     self.user_id = str(deserialized['d']['user']['id'])
+                    self.username = str(deserialized['d']['user']['username'])
                 except (KeyError, TypeError):
                     pass
             return deserialized
@@ -552,6 +554,16 @@ class DiscordWrapper:
             self.is_ready = True
             if not self.is_reconnecting:
                 print('[*] Session stablished !')
+                try:
+                    notifier = getattr(self.menu, 'notifier', None)
+                    if notifier is not None and self.username:
+                        notifier.label = self.username
+                except Exception:
+                    pass
+                if self.username:
+                    self.menu.notify(f'[*] Connected to Discord as {self.username}.')
+                else:
+                    self.menu.notify('[*] Connected to Discord.')
             return True
         except Exception as e:
             self.is_connected = False

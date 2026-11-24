@@ -121,6 +121,13 @@ Optional, in the `[NOTIFICATIONS]` section of the config:
 
 Leave the values blank to disable external notifications.
 
+Events sent to the webhook / Telegram, each prefixed with the Discord username (`[username] message`):
+
+- Connected to Discord (first connect of each account)
+- Connection lost, reconnection succeeded / failed
+- Captcha detected, captcha bypassed, incorrect code, maximum captcha regens exceeded
+- Buy failed, proxy error, worker thread stopped, autofishbot stopped
+
 ## Captcha Information
 All captchas are solved using the OCR.SPACE API for image to text recognition. The reason for choosing an online API was to avoid the annoyance of forcing users to install heavy image recognition modules (and saving the unnecessary effort of creating a specific image recognition model for this type of captcha). Among the API options, the most practical and accessible for the user is OCR.SPACE and, furthermore, it presented a reasonable consistency in correctly identifying the text in the image in the tests performed. **Therefore, to automatically solve the captchas, you will need an [API KEY](#how-do-i-get-my-free-key-)**.
 
@@ -130,7 +137,7 @@ The methodology is quite straight forward, when a new captcha is detected:
 2. The answers are filtered to assert those with reasonable certainty
 3. The filtered answers are tested
 
-If all tests fail, a request to regenerate the captcha will be sent (up to 3 times). If the bot, ultimately, fails to solve all captchas, it will wait until you solve it manually.
+If all tests fail, a request to regenerate the captcha will be sent (up to 5 times). If the bot, ultimately, fails to solve all captchas, it will wait until you solve it manually.
 
 Keep in mind that the captcha detection method is not flawless, unexpected events can cause some unusual behavior that could influence detection accuracy. Therefore, it should not be left alone without monitoring for longer periods of time.
 ### HOW DO I GET MY **FREE** KEY ?
