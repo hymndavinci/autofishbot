@@ -1,31 +1,67 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from json import dumps
+from pathlib import Path
 from queue import Queue, Empty
 from re import sub
 from threading import Thread, Lock
 from time import sleep, time
 from requests import post
 
+#Images used by the Discord embeds (assets/images/). Replace the files to use your own pictures:
+#  cat.png    - small symbol shown beside regular notifications
+#  banner.png - 16:9 banner shown above important notifications
+_ASSET_DIR = Path(__file__).resolve().parent.parent / 'assets' / 'images'
+_ICON_NAME = 'cat.png'
+_BANNER_NAME = 'banner.png'
+_asset_cache: dict = {}
+
+
+def _load_asset(name: str) -> bytes | None:
+    '''Reads an embed image once; returns None when the file is missing (embeds then go without it).'''
+    if name not in _asset_cache:
+        try:
+            _asset_cache[name] = (_ASSET_DIR / name).read_bytes()
+        except OSError:
+            _asset_cache[name] = None
+    return _asset_cache[name]
+
 
 class NotificationManager:
     """Best-effort asynchronous Telegram and Discord notification delivery."""
-    # (keyword, embed title, embed color) — first match wins, most specific first
+
+    #Text-card side-bar colours: pale pink by default, a soft tint only for things that need you.
+    _LEVELS = {
+        'ok':      0xF7D6DE,  #pale pink
+        'info':    0xF7D6DE,
+        'warn':    0xF0DDB0,  #soft sand
+        'alert':   0xE58F9F,  #rose
+        'stopped': 0xD6D6DA,  #light grey
+    }
+    _BANNER_BAR = 0xFFFFFF    #bar colour of the banner embed (white)
+    _MARKS = {'ok': '✿', 'info': '✿', 'warn': '✦', 'alert': '✦', 'stopped': '✧'}
+    #Titles that get the 16:9 banner in addition to the alert/stopped levels (everything else stays compact)
+    _BANNER_TITLES = ('Connected', 'Back online')
+
+    # (keyword, embed title, level, status text) — first match wins, most specific first
     _EMBED_STYLES = [
-        ('maximum captcha regens exceeded', '🔴 Captcha Needs Manual Input', 0xE74C3C),
-        ('reconnection failed', '🔴 Reconnection Failed', 0xE74C3C),
-        ('manual intervention', '🔴 Manual Intervention Required', 0xE74C3C),
-        ('manual input', '🔴 Captcha Needs Manual Input', 0xE74C3C),
-        ('connection lost', '🔴 Connection Lost', 0xE74C3C),
-        ('reconnection succeeded', '🟢 Reconnected', 0x2ECC71),
-        ('connected to discord', '🟢 Connected', 0x2ECC71),
-        ('captcha bypassed', '🟢 Captcha Solved', 0x2ECC71),
-        ('captcha detected', '🟡 Captcha Detected', 0xF1C40F),
-        ('incorrect code', '🟠 Incorrect Code', 0xE67E22),
-        ('buy failed', '🟠 Buy Failed', 0xE67E22),
-        ('proxy error', '🟠 Proxy Error', 0xE67E22),
-        ('autofishbot stopped', '⏹️ Bot Stopped', 0x95A5A6),
-        ('stopped', '🔴 Worker Stopped', 0xE74C3C),
+        ('maximum captcha regens exceeded', 'Captcha needs you',   'alert',   'Action needed'),
+        ('reconnection failed',             'Reconnection failed', 'alert',   'Action needed'),
+        ('manual intervention',             'Manual intervention', 'alert',   'Action needed'),
+        ('manual input',                    'Captcha needs you',   'alert',   'Action needed'),
+        ('connection lost',                 'Connection lost',     'alert',   'Offline'),
+        ('reconnection succeeded',          'Back online',         'ok',      'Online'),
+        ('connected to discord',            'Connected',           'ok',      'Online'),
+        ('captcha bypassed',                'Captcha solved',      'ok',      'Resolved'),
+        ('captcha detected',                'Captcha detected',    'warn',    'Attention'),
+        ('incorrect code',                  'Incorrect code',      'warn',    'Attention'),
+        ('buy failed',                      'Purchase failed',     'warn',    'Retrying'),
+        ('proxy error',                     'Proxy error',         'warn',    'Attention'),
+        ('emerald fish',                    'Emerald fish',        'ok',      'Nice catch'),
+        ('boost purchase',                  'Boost purchase',      'info',    'Info'),
+        ('autofishbot stopped',             'Stopped',             'stopped', 'Offline'),
+        ('stopped',                         'Worker stopped',      'alert',   'Action needed'),
     ]
 
     def __init__(self, config, menu=None):
@@ -60,25 +96,67 @@ class NotificationManager:
         self.start()
         self.queue.put(str(message)[:1800])
 
-    def _discord_embed(self, message: str) -> dict:
-        '''Builds a color-coded Discord embed for a notification message.'''
+    def _discord_embeds(self, message: str, with_images: bool = True) -> tuple[list, list]:
+        '''Builds the stacked Discord embeds for a message: (embeds, attachment file names).
+
+        Important events get a 16:9 banner embed on top of the text card; regular ones get the
+        text card with the small cat symbol. Without images (missing file / fallback) it is text only.
+        '''
         lowered = message.lower()
-        title, color = '🔔 Notification', 0x3498DB
-        for term, style_title, style_color in self._EMBED_STYLES:
+        title, level, status = 'Notification', 'info', 'Info'
+        for term, style_title, style_level, style_status in self._EMBED_STYLES:
             if term in lowered:
-                title, color = style_title, style_color
+                title, level, status = style_title, style_level, style_status
                 break
-        description = sub(r'^(\[[^\]]*\]\s*)+', '', message).strip() or message
-        embed = {
-            'title': title,
-            'description': description,
-            'color': color,
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'footer': {'text': 'autofishbot'},
-        }
+        detail = sub(r'^(\[[^\]]*\]\s*)+', '', message).strip() or message
+
+        use_banner = bool(
+            with_images
+            and (level in ('alert', 'stopped') or title in self._BANNER_TITLES)
+            and _load_asset(_BANNER_NAME)
+        )
+        use_icon = bool(with_images and not use_banner and _load_asset(_ICON_NAME))
+
+        lines = []
         if self.label:
-            embed['author'] = {'name': self.label}
-        return embed
+            lines.append(f'> **account** ‧ {self.label}')
+        lines.append(f'> **status** ‧ {status.lower()}')
+        card = {
+            'title': f'{self._MARKS[level]} {title.lower()}',
+            'description': '\n'.join(lines) + f'\n\n⋆ ˚ {detail}',
+            'color': self._LEVELS[level],
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'footer': {'text': '✿ autofishbot'},
+        }
+        embeds, files = [], []
+        if use_banner:
+            embeds.append({'color': self._BANNER_BAR, 'image': {'url': f'attachment://{_BANNER_NAME}'}})
+            files.append(_BANNER_NAME)
+        elif use_icon:
+            card['thumbnail'] = {'url': f'attachment://{_ICON_NAME}'}
+            files.append(_ICON_NAME)
+        embeds.append(card)
+        return embeds, files
+
+    def _post_discord(self, webhook: str, message: str):
+        '''Sends the embeds with their images attached; falls back to text-only, then to plain text.'''
+        embeds, files = self._discord_embeds(message, with_images=True)
+        if files:
+            response = post(
+                webhook,
+                data={'payload_json': dumps({'embeds': embeds})},
+                files={f'files[{i}]': (name, _load_asset(name), 'image/png') for i, name in enumerate(files)},
+                timeout=8,
+            )
+            if response.status_code != 400:  #400 = Discord rejected the attachment, retry without images
+                response.raise_for_status()
+                return
+        try:
+            payload = {'embeds': self._discord_embeds(message, with_images=False)[0]}
+        except Exception:
+            payload = {'content': message}
+        response = post(webhook, json=payload, timeout=8)
+        response.raise_for_status()
 
     def _deliver(self, message: str):
         webhook = getattr(self.config, "discord_webhook_url", "")
@@ -86,12 +164,7 @@ class NotificationManager:
         chat_id = getattr(self.config, "telegram_chat_id", "")
         if webhook:
             try:
-                try:
-                    payload = {'embeds': [self._discord_embed(message)]}
-                except Exception:
-                    payload = {'content': message}
-                response = post(webhook, json=payload, timeout=8)
-                response.raise_for_status()
+                self._post_discord(webhook, message)
             except Exception as exc:
                 if self.menu:
                     self.menu.notify(f"[!] Discord notification delivery failed: {type(exc).__name__}")

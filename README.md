@@ -128,7 +128,7 @@ Events sent to the webhook / Telegram, each prefixed with the Discord username (
 - Captcha detected, captcha bypassed, incorrect code, maximum captcha regens exceeded
 - Buy failed, proxy error, worker thread stopped, autofishbot stopped
 
-Discord messages are sent as embeds, color-coded by severity (green = ok, yellow/orange = warning, red = needs attention, grey = stopped), with the account name as the author and a timestamp. Telegram messages stay plain text with the `[username]` prefix.
+Discord messages are sent as soft, minimal embeds: a short lowercase title, the account name, a status line and a timestamp. Regular events carry a small cat symbol (`assets/images/cat.png`); important ones (connected, back online, anything that needs you, stopped) get a 16:9 banner (`assets/images/banner.png`) stacked above the text card. Both images are attached automatically — swap the files to use your own pictures. Side-bar colours: pale pink = normal, sand = warning, rose = action needed, light grey = stopped. If an image is missing or rejected, the embed is sent without it. Telegram messages stay plain text with the `[username]` prefix.
 
 ## Captcha Information
 All captchas are solved using the OCR.SPACE API for image to text recognition. The reason for choosing an online API was to avoid the annoyance of forcing users to install heavy image recognition modules (and saving the unnecessary effort of creating a specific image recognition model for this type of captcha). Among the API options, the most practical and accessible for the user is OCR.SPACE and, furthermore, it presented a reasonable consistency in correctly identifying the text in the image in the tests performed. **Therefore, to automatically solve the captchas, you will need an [API KEY](#how-do-i-get-my-free-key-)**.
@@ -158,6 +158,7 @@ Upstream history (up to experimental-2.0.0) lives in [assets/changelog.md](asset
 ### This fork
 - **Multi-account launcher** (`multi.py`): one process, tabbed curses UI, staggered connects, duplicate-token guard, per-account failure isolation
 - **New modules**: `app/stats.py` (session statistics) and `app/notifications.py` (Discord webhook / Telegram)
+- **Webhook redesign**: aesthetic stacked Discord embeds — cat symbol, 16:9 banner for important events, status line, subtle severity tint (falls back gracefully if an image is missing or rejected)
 - **Runtime toggles**: keys `1`–`7` plus `W` to persist automation state to the config (atomic save)
 - **Reliability**: bounded exponential retry for purchases, gateway reconnect with backoff (8 attempts max)
 - **Refactor**: `autofishbot.py`, `app/config.py`, `app/menu.py`, `app/scheduler.py` and `app/api_wrapper.py` reworked; config loading hardened (required-field validation, outdated-config detection)
