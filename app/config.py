@@ -14,7 +14,7 @@ from sys import argv
 
 
 #------------------------ CONSTANTS --------------------------#
-REPO_CONFIG = 'https://github.com/thejoabo/virtualfisher-bot/blob/main/assets/template.config'
+REPO_CONFIG = 'https://github.com/hymndavinci/autofishbot/blob/main/assets/template.config'
 
 
 #------------------------- CLASSES ---------------------------#

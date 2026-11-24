@@ -66,7 +66,7 @@ To get it, you will need to:
 
 # <h3 align='center'>DEBUG</h3><br>
 
-The **DEBUG** parameter stands for the **boolean** value used to log back-end information about exceptions and errors. The purpose of this setting is to help users draw up an [issue](https://github.com/thejoabo/virtualfisher-bot/issues/new) report by including debugging information to determine where and why the error occurred.
+The **DEBUG** parameter stands for the **boolean** value used to log back-end information about exceptions and errors. The purpose of this setting is to help users draw up an [issue](https://github.com/hymndavinci/autofishbot/issues/new) report by including debugging information to determine where and why the error occurred.
 
 **Note**: all debug information is outputted to '```{autofishbot directory}/app/debug.log```' file.
 
