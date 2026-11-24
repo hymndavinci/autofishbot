@@ -3,6 +3,10 @@ Auto fishing bot made in Python 3 for [Virtual Fisher](https://virtualfisher.com
 
 Fork of [thejoabo/autofishbot](https://github.com/thejoabo/autofishbot) (upstream is archived) — actively maintained here, heavily refactored, with **multi-account support**.
 
+## Screenshot
+
+![Autofishbot running two accounts in one terminal](assets/images/screenshot.png)
+
 ## Features
 - Auto Fish
 - Menu (TUI) — normal and compact mode
