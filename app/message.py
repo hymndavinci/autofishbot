@@ -34,11 +34,6 @@ class Message:
     def name(self) -> str:
         '''Returns the class name in the correct format.'''
         return f'{self.__class__.__name__}'
-
-    @property
-    def text(self) -> str:
-        '''All visible text of the message, classic embeds and Components V2 alike.'''
-        return ' '.join(filter(None, [self.title, self.description, self.content, self.untitled]))
     
     @staticmethod
     def _walk_components(components: list) -> tuple[list, list]:
