@@ -178,13 +178,13 @@ class Receiver:
                 self.captcha.reset()
 
             if self.captcha.detected and not self.captcha.regenerating:
-                if self.message.content == 'You may now continue.':
+                if 'You may now continue' in self.message.text:
                     #Captcha bypassed
                     self.menu.rcv_bypasses += 1
                     self.captcha.reset()
                     self.menu.notify('[*] Captcha bypassed !')
                 else:
-                    if self.message.content.find('Incorrect code') > -1:
+                    if 'Incorrect code' in self.message.text:
                         self.menu.notify('[*] Incorrect code.', NotificationPriority.LOW)
                         continue
                     else:
