@@ -1,0 +1,29 @@
+AUTOFISHBOT FEATURE UPDATE
+
+Install by extracting this ZIP into the existing project root and allowing files to merge/overwrite.
+
+Included replacements:
+- autofishbot.py
+- app/config.py
+- app/menu.py
+- app/scheduler.py
+- app/api_wrapper.py
+
+New modules:
+- app/stats.py
+- app/notifications.py
+
+Documentation/template:
+- README.md
+- assets/template.config
+
+Do not replace or delete your existing configs/ directory. The patch intentionally omits personal config files so account tokens and API keys are not distributed or overwritten.
+
+Usage:
+- Keys 1-7 continue to toggle automation.
+- Press W in the terminal menu to save the current automation toggles to the active config.
+- To enable Discord notifications, add a [NOTIFICATIONS] section and set DISCORD_WEBHOOK_URL.
+- To enable Telegram notifications, set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in [NOTIFICATIONS].
+- Leave notification values blank to disable external notifications.
+
+The update has been compile-checked and unit-tested with simulated responses. No live game session or external notification endpoint was tested.
