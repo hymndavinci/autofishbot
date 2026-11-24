@@ -421,7 +421,7 @@ class DiscordWrapper:
                     response = loads(request.content)
                     err_message = f'Code: {status_code}\nResponse: {response}\nRequest: {data}\nHeaders: {headers}'
                     
-                    if int(response['code']) == INVALID_FORM_BODY:
+                    if category == BUTTON or int(response.get('code', 0)) == INVALID_FORM_BODY:
                         #Non critical, but send slash command instead
                         #debug - ax0 (button interaction rejected -> caller falls back to /fish)
                         debugger.log(err_message, 'ax0')
@@ -457,9 +457,14 @@ class DiscordWrapper:
                     sleep(30)
                     return False
             else:
+                if category == BUTTON and status_code in (403, 404):
+                    #Button not ours / message gone: not fatal, caller falls back to /fish
+                    debugger.log(f'{status_code} on button interaction', f'{self.name} button')
+                    self.menu.notify(f'[*] Button rejected ({status_code}), falling back to /fish.', NotificationPriority.LOW)
+                    return False
                 #Critical, debug and exit  
                 debugger.log(data, f'{self.name} {status_code}')
-                exit(status_code)
+                exit(f'[E] Discord returned HTTP {status_code} (command: {command or category}). Stopping this account.')
         else:
             #201 and 204 - Successfull interactions
             return True

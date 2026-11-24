@@ -22,7 +22,8 @@ from os import listdir
 from random import uniform
 from sys import argv
 from threading import Thread
-from time import sleep
+from time import sleep, strftime
+from os import makedirs
 
 from app import *
 from app.menu import SafeScr, ModernUI, curses_init
@@ -41,12 +42,30 @@ class Account:
         self.receiver = receiver
         self.scheduler = scheduler
         self.dispatcher = dispatcher
+        self.error: str = ''
         self.threads: list[Thread] = [
-            Thread(target=receiver.run, daemon=True, name=f'{name}:Receiver'),
-            Thread(target=scheduler.run, args=(dispatcher,), daemon=True, name=f'{name}:Scheduler'),
-            Thread(target=dispatcher.run, daemon=True, name=f'{name}:Dispatcher'),
+            Thread(target=self._guard, args=('Receiver', receiver.run), daemon=True, name=f'{name}:Receiver'),
+            Thread(target=self._guard, args=('Scheduler', scheduler.run, dispatcher), daemon=True, name=f'{name}:Scheduler'),
+            Thread(target=self._guard, args=('Dispatcher', dispatcher.run), daemon=True, name=f'{name}:Dispatcher'),
         ]
         self.dead_notified = False
+
+    def _guard(self, label: str, fn, *args) -> None:
+        '''Runs a worker thread and records WHY it stopped (otherwise a dead worker is silent).'''
+        try:
+            fn(*args)
+            reason = 'finished'
+        except SystemExit as e:
+            reason = f'exit: {e.code}' if e.code else 'exit'
+        except BaseException as e:
+            reason = f'{type(e).__name__}: {e}'
+        self.error = f'{label} stopped ({reason})'[:400]
+        try:
+            makedirs('./dumps', exist_ok=True)
+            with open('./dumps/multi_errors.log', 'a', encoding='utf-8') as f:
+                f.write(f'[{strftime("%H:%M:%S")}] {self.name} - {self.error}\n')
+        except Exception:
+            pass
 
     @property
     def dead(self) -> bool:
@@ -127,7 +146,7 @@ def run_ui(stdscr: curses.window, accounts: list[Account]) -> None:
             if acc.dead and not acc.dead_notified:
                 acc.dead_notified = True
                 acc.menu.is_alive = False
-                acc.menu.notify(f'[E] "{acc.name}" stopped (a worker thread exited).', NotificationPriority.VERY_HIGH)
+                acc.menu.notify(f'[E] {acc.error or "a worker thread exited"}', NotificationPriority.VERY_HIGH)
         if all(acc.dead or not acc.menu.is_alive for acc in accounts):
             return None
 
