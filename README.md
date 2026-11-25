@@ -60,6 +60,39 @@ One process, one terminal: every account keeps its own config, gateway connectio
 - Accounts connect one after another (2–4 s stagger); configs sharing the same token are skipped
 - If one account's worker thread dies, the others keep running
 
+### Pterodactyl / Headless Deployment
+Both `autofishbot.py` and `multi.py` automatically detect Pterodactyl (`P_SERVER_UUID`) or non-TTY containers and run in **headless mode** (plain console logs + interactive panel console commands, no `curses` required).
+
+1. Upload the project files to the Pterodactyl server (make sure your `.config` file(s) are inside `configs/`).
+2. Set `REQUIREMENTS_FILE` to `requirements.txt` (default on Python eggs).
+3. In the **Startup** tab, set `PY_FILE`:
+   - `autofishbot.py` for a single account (if `configs/` has multiple files, set environment variable `AFB_CONFIG=akun1.config`).
+   - `multi.py` to run all `*.config` files in `configs/` in one container.
+   - `diagnose.py` for a one-shot connection/token check.
+4. Optional environment variables:
+   - `AFB_CONFIG` — config file name for `autofishbot.py` when multiple configs exist.
+   - `AFB_STATUS_MIN` — periodic status log interval in minutes (default `10`, `0` to disable).
+   - `AFB_VERBOSE=1` — also print low-priority notifications.
+   - `AFB_HEADLESS=1` / `0` — force headless or TUI mode.
+   - `AFB_TG_REMOTE=0` — disable 2-way Telegram remote control (enabled automatically when `TELEGRAM_BOT_TOKEN` & `TELEGRAM_CHAT_ID` are set).
+   - `AFB_WATCHDOG_SEC` — seconds without a catch before auto-recovering a stuck `FISHING` session (default `300`, `0` to disable).
+   - `AFB_WEB=1` — enable the lightweight Web Dashboard (automatically binds to Pterodactyl's `SERVER_PORT`, or set `AFB_WEB_PORT`).
+   - `AFB_WEB_PASSWORD=<secret>` — protect the Web Dashboard & API with a password (also configurable under `[WEB]` in `.config`).
+5. Type `help` in the Pterodactyl console for live commands (`status`, `pause`, `resume`, `1`–`7`, `w`, `q`, and `use <n|name>` in `multi.py`). Stopping via `q` or the panel Stop button (`SIGTERM`) exits cleanly with code `0`.
+
+### 2-Way Telegram Remote Control
+When `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are configured in `[NOTIFICATIONS]`, the bot automatically listens for commands **only from the authorized chat ID(s)**:
+- `/menu [account]` — interactive **inline button panel** (Refresh, Pause/Resume, Sell, Daily, Inventory, Boosts, Toggles, Live Logs, Account Switcher)
+- `/logs [count] [account]` — view recent logs from the in-memory ring buffer (default 20, max 60)
+- `/status`, `/stats [account]`, `/accounts`
+- `/pause [account|all]`, `/resume [account|all]`
+- `/sell [account]`, `/daily [account]`, `/inv [account]`
+- `/fishboost [account]`, `/treasureboost [account]`
+- `/toggle <1-7|feature> [account]`, `/save [account]`, `/help`
+
+### Web Dashboard (Optional)
+Enable via `AFB_WEB=1` (or `[WEB] ENABLED = TRUE` in `.config`). On Pterodactyl it automatically binds `0.0.0.0:$SERVER_PORT` (access via `http://<server-ip>:<port>`). Set `AFB_WEB_PASSWORD` (or `[WEB] PASSWORD`) to protect access. Includes live stats, account switcher for `multi.py`, recent catches feed, **Live Logs** viewer (200-line ring buffer with search filter), Pause/Resume, action buttons, and automation toggles.
+
 ## Configuration
 You can customize the options listed below in the config file — copy [assets/template.config](assets/template.config) into `configs/` and fill it in, or run `python autofishbot.py --create`:
 

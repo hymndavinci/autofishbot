@@ -7,6 +7,8 @@ dumps
 app/*.json
 *.code-workspace
 assets/images/logo.png
+/autofishbot-pterodactyl.zip
+/INSTALL-UPDATE.txt
 
 
 # Byte-compiled / optimized / DLL files

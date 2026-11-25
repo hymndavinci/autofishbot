@@ -7,13 +7,18 @@ from . import *
 from .utils import convert_time, debugger
 from .scheduler import SchStatus
 from .stats import SessionStats
-import curses
+try:
+    import curses
+except ImportError:
+    curses = None
 from time import sleep, time
 from datetime import datetime
 import locale
 from math import ceil
-from threading import Thread
+from collections import deque
+from threading import Lock, Thread
 from os import path, environ, name as os_name
+import sys
 from re import sub
 
 class SafeScr:
@@ -26,9 +31,10 @@ class SafeScr:
         return getattr(self._scr, name)
 
     def _safe(self, fn, *args):
+        errs = (curses.error, UnicodeError) if curses is not None else (UnicodeError,)
         try:
             return fn(*args)
-        except (curses.error, UnicodeError):
+        except errs:
             return None
 
     def addstr(self, *args):
@@ -42,15 +48,15 @@ class SafeScr:
 import json
 
 #------------------------ CONSTANTS --------------------------#
-MENUART = [ ' ___        _         ___  _      _     ___       _   ',
-            '/   \ _  _ | |_  ___ | __|(_) ___| |_  | _ ) ___ | |_ ',
-            '| - || || ||  _|/ _ \| _| | |(_-/|   \ | _ \/ _ \|  _|',
-            '|_|_| \_._| \__|\___/|_|  |_|/__/|_||_||___/\___/ \__|']
+MENUART = [ r' ___        _         ___  _      _     ___       _   ',
+            r'/   \ _  _ | |_  ___ | __|(_) ___| |_  | _ ) ___ | |_ ',
+            r'| - || || ||  _|/ _ \| _| | |(_-/|   \ | _ \/ _ \|  _|',
+            r'|_|_| \_._| \__|\___/|_|  |_|/__/|_||_||___/\___/ \__|']
 
-C_MENUART = [' ___  ___  ___       _   ',
-             '/   \| __|| _ ) ___ | |_ ',
-             '| - || _| | _ \/ _ \|  _|',
-             '|_|_||_|  |___/\___/ \__|']
+C_MENUART = [r' ___  ___  ___       _   ',
+             r'/   \| __|| _ ) ___ | |_ ',
+             r'| - || _| | _ \/ _ \|  _|',
+             r'|_|_||_|  |___/\___/ \__|']
 
 TOGGLE_KEYS = {
     ord('1'): 'more_fish',
@@ -92,8 +98,7 @@ class NotificationPriority:
 @dataclass(slots=True)
 class Keybinder:
     '''Keybinder class is responsible to load/create/validate keybinds information to be used in menus.'''
-    file: str = './app/keybinds.json'
-    #file: str = './keybinds.json'
+    file: str = field(default_factory=lambda: path.join(path.dirname(path.abspath(__file__)), 'keybinds.json'))
     
     keybinds: dict = field(init=False, repr=False)
     _list: list[tuple] = field(default_factory=list)
@@ -116,13 +121,13 @@ class Keybinder:
         '''Loads and validates the stored keybinds.json file. If invalid 
         loads default and if nonexistent create new.'''
         if not path.exists(self.file):
-            with open(self.file, 'w') as f:
+            with open(self.file, 'w', encoding='utf-8') as f:
                 f.write(json.dumps(DEFAULT_KEYBINDS))
-            self.keybinds = DEFAULT_KEYBINDS
+            self.keybinds = DEFAULT_KEYBINDS.copy()
             return True
         else:
             try:
-                with open(self.file, 'r') as f:
+                with open(self.file, 'r', encoding='utf-8') as f:
                     self.keybinds = json.loads(f.read())
             except json.decoder.JSONDecodeError as e:
                 print(f'Menu ({self.name}) - Err: {e}')
@@ -145,7 +150,7 @@ class Keybinder:
                 print('[*] Custom menu keybinds loaded.')
         else:
             print('[!] Invalid keybinds file, loading default.')
-            self.keybinds = DEFAULT_KEYBINDS
+            self.keybinds = DEFAULT_KEYBINDS.copy()
 
 @dataclass(slots=True)
 class BaseMenu:
@@ -181,12 +186,15 @@ class BaseMenu:
 
     #UI state
     started: float = field(default_factory=time)
+    last_catch_at: float = field(default_factory=time)
     log: list = field(default_factory=list, repr=False)
+    event_logs: deque = field(default_factory=lambda: deque(maxlen=200), repr=False)
     _unicode: bool = True
     _colors: bool = False
         
     #Backend
     _config_list: list[tuple] = field(default_factory=list)
+    _notif_lock: Lock = field(default_factory=Lock, repr=False)
     
     def __post_init__(self) -> None:
         if self.autorun:
@@ -286,6 +294,8 @@ class BaseMenu:
     def run(self, config: ConfigManager, dispatcher: Dispatcher, profile: Profile, scheduler: Scheduler, 
             threads: list[Thread]) -> None:
         '''Prepares the menu and starts the curses interface.'''
+        if curses is None:
+            exit('[E] curses is not available on this platform. Install windows-curses or run with --headless.')
         self.prepare(config, dispatcher, profile, scheduler)
         try:
             curses.wrapper(lambda scr, th: self.__run__(SafeScr(scr), th), threads)
@@ -294,11 +304,19 @@ class BaseMenu:
     
     def log_catch(self, items: list) -> None:
         '''Stores a short one-line summary of the last catch for the RECENT panel.'''
+        self.last_catch_at = time()
         parts = [sub(r'\s{2,}', ' ', sub(r':\w+:', '', str(i))).strip() for i in items if i and str(i).strip() and 'LEVEL UP' not in str(i)]
         if parts:
-            self.log.append((datetime.now().strftime('%H:%M:%S'), ', '.join(parts)))
-            if len(self.log) > 60:
-                self.log = self.log[-60:]
+            with self._notif_lock:
+                self.log.append((datetime.now().strftime('%H:%M:%S'), ', '.join(parts)))
+                if len(self.log) > 60:
+                    self.log = self.log[-60:]
+
+    def get_logs(self, limit: int = 50) -> list[tuple[str, str]]:
+        '''Returns up to the latest `limit` notification/event log lines (oldest -> newest).'''
+        limit = max(1, min(int(limit), 200))
+        with self._notif_lock:
+            return list(self.event_logs)[-limit:]
 
     def kill(self) -> None:
         '''Kills the menu activity.'''
@@ -318,9 +336,9 @@ class BaseMenu:
         return (self.y, self.x)
       
     #------------------------ NOTIFICATIONS --------------------------#
-    def notify(self, message: str, display_time: float = NotificationPriority.NORMAL, delimiter: str = '...') -> None:
-        '''Adds a new notification to the notifications queue.'''
-        #Todo: refactor this function
+    def notify(self, message: str, display_time: float = NotificationPriority.NORMAL,
+               delimiter: str = '...', external: bool = True) -> None:
+        '''Adds a new notification to the notifications queue (thread-safe).'''
         message = str(message)  #(long messages are clipped by the UI when drawn)
 
         lowered = message.lower()
@@ -330,7 +348,7 @@ class BaseMenu:
             or 'manual intervention' in lowered
             or 'reconnection failed' in lowered
         )
-        if urgent:
+        if urgent and sys.stdout.isatty():
             try:
                 curses.beep()
             except Exception:
@@ -339,67 +357,71 @@ class BaseMenu:
                 except Exception:
                     pass
 
-        external = any(term in lowered for term in (
+        should_send_external = external and any(term in lowered for term in (
             'maximum captcha regens exceeded', 'manual input', 'manual intervention',
             'emerald fish', 'boost purchase', 'buy failed',
             'connection lost', 'reconnection succeeded', 'reconnection failed',
             'connected to discord', 'autofishbot stopped', 'proxy error',
-            'captcha detected', 'captcha bypassed', 'incorrect code', 'stopped'
+            'captcha detected', 'captcha bypassed', 'incorrect code', 'stopped',
+            'watchdog:'
         ))
-        if external and self.notifier:
+        if should_send_external and self.notifier:
             try:
                 self.notifier.send(message)
             except Exception:
                 pass
-        
-        important = display_time in [NotificationPriority.HIGH, NotificationPriority.VERY_HIGH]
 
-        #Skip exact repeats of what is on screen / already waiting at the end of the queue
-        if not important:
-            if message == self.current_notification:
-                return None
-            if self.notification_queue and self.notification_queue[-1][0] == message:
-                return None
+        important = display_time in (NotificationPriority.HIGH, NotificationPriority.VERY_HIGH)
 
-        #Queue full: drop new low-priority messages, make room for important ones
-        if len(self.notification_queue) >= MAX_NOTIFICATION_QUEUE:
+        with self._notif_lock:
+            self.event_logs.append((datetime.now().strftime('%H:%M:%S'), message))
+            #Skip exact repeats of what is on screen / already waiting at the end of the queue
             if not important:
-                return None
-            self.notification_queue = self.notification_queue[:MAX_NOTIFICATION_QUEUE - 1]
-        
-        #If high prio, put the notification at the beginning
-        if important:
-            self.notification_queue = [(message, display_time)] + self.notification_queue
-        else:
-            self.notification_queue.append((message, display_time))
-        
+                if message == self.current_notification:
+                    return None
+                if self.notification_queue and self.notification_queue[-1][0] == message:
+                    return None
+
+            #Queue full: drop new low-priority messages, make room for important ones
+            if len(self.notification_queue) >= MAX_NOTIFICATION_QUEUE:
+                if not important:
+                    return None
+                self.notification_queue = self.notification_queue[:MAX_NOTIFICATION_QUEUE - 1]
+
+            #If high prio, put the notification at the beginning
+            if important:
+                self.notification_queue.insert(0, (message, display_time))
+            else:
+                self.notification_queue.append((message, display_time))
+
     def _err_notification(self, e: str) -> None:
-        '''Schedules an notification containing an error message, it automatically checks 
-        if the notification isn't already in the queue.'''
+        '''Schedules a notification containing an error message, deduplicating queue entries.'''
         err_message = f'[E] {self.name} error: {e}'
-        for notification, _ in self.notification_queue:
-            if err_message == notification:
-                return None
+        with self._notif_lock:
+            for notification, _ in self.notification_queue:
+                if err_message == notification:
+                    return None
 
         debugger.log(e, f'{self.name} - run')
         self.notify(err_message, NotificationPriority.NORMAL)
-
         return None
-    
-    def notifications_thread(self) -> None:
-        '''Controls the notification queue and manage its display time.'''
-        #Todo: use queue library instead
-        while True:
-            if self.notification_queue != []:
-                message, display_time = self.notification_queue.pop(0)
-                self.current_notification = message
 
-                #Backlog: show messages faster so the queue never gets stale
-                if len(self.notification_queue) >= 5:
+    def notifications_thread(self) -> None:
+        '''Controls the notification queue and manages its display time.'''
+        while True:
+            item = None
+            backlog = 0
+            with self._notif_lock:
+                if self.notification_queue:
+                    item = self.notification_queue.pop(0)
+                    backlog = len(self.notification_queue)
+            if item is not None:
+                message, display_time = item
+                self.current_notification = message
+                if backlog >= 5:
                     display_time = min(display_time, 1.0)
                 sleep(display_time)
                 self.current_notification = ''
-
             else:
                 sleep(self.config.refresh_rate)
     
@@ -430,7 +452,7 @@ class BaseMenu:
             if ord(key) == pressed_key:
                 match action:
                     case 'Pause':
-                        self.dispatcher.pause
+                        self.dispatcher.toggle_pause()
                     case 'Quit':
                         self.kill()
                     case 'Sell Inventory':
@@ -456,11 +478,11 @@ class BaseMenu:
                         else:
                             self.sch.schedule(self.sch.commands.pos)
                     case 'Update Cosmetics':
-                        raise Exception('Feature not implemented.')
+                        self.notify('[!] Update Cosmetics is not implemented yet.', NotificationPriority.LOW)
                     case 'Buy Morefish':
                         self.sch.schedule(self.sch.commands.morefish)
                     case 'Buy Moretreasures':
-                        self.sch.schedule(self.sch.commands.moretreausre)
+                        self.sch.schedule(self.sch.commands.moretreasure)
                     case 'Claim Daily':
                         self.sch.schedule(self.sch.commands.daily)
                     case 'Show Quests':
@@ -974,7 +996,7 @@ class ModernUI:
                 self.box(by, 0, 4, W, 'STATS')
                 st, _, sp = self.state()
                 l1 = f'{st}  {m.rcv_streak} streak  {m.rcv_fish} fish'
-                l2 = f'{self.rate():.1f}/min  cd {rows[6][1]}  bypass {m.rcv_bypasses}'
+                l2 = f'{self.rate():.1f}/min  cd {rows[8][1]}  bypass {m.rcv_bypasses}'
                 self.safe(self.put, by + 1, 2, self.clip(l1, W - 4), self.attr(sp, bold=True))
                 self.safe(self.put, by + 2, 2, self.clip(l2, W - 4), self.attr(0, dim=True))
                 used = 4

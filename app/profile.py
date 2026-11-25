@@ -278,7 +278,7 @@ class Buffs:
                 self.treasure_quality = line[start:]
             if line.startswith('XP'):
                 self.xp_multiplier = line[start:]
-            if line.find('cooldown'):
+            if 'cooldown' in line:
                 self.fishing_cooldown = line[start:]
         
         self.last_update = time()
@@ -429,8 +429,9 @@ class Profile:
             first_char = line[0]
             #Basic info
             if line.startswith('Balance:'):
-                balance = sub('[^\d+]', '', line)
-                self.balance = '${:,.2f}'.format(int(balance))
+                balance = sub(r'[^\d]', '', line)
+                if balance:
+                    self.balance = '${:,.2f}'.format(int(balance))
             elif line.find('XP to next level') > -1:
                 #Level
                 level = sub(' ', '', sub('[a-z]', '',  sub(', ', '|', line)))
@@ -438,7 +439,7 @@ class Profile:
                     level = sub('L', '|L', level) 
                 else: 
                     level = sub('L', '', level)
-                self.level = sub('\|', ' | ', level)
+                self.level = sub(r'\|', ' | ', level)
             
             #Cosmetics
             elif line.find('Rod') > -1:
@@ -452,28 +453,37 @@ class Profile:
             
             #Exotic fishes
             elif line.find('Gold Fish') > -1:
-                end = line.find('<') - 1
-                self.exotic_fish.gold = int(sub(',', '', line[:end]))
+                end = line.find('<')
+                digits = sub(r'[^\d]', '', line[:end] if end > -1 else line)
+                if digits:
+                    self.exotic_fish.gold = int(digits)
             elif line.find('Emerald Fish') > -1:
                 end = line.find('<')
-                self.exotic_fish.emerald = int(sub(',', '', line[:end]))
+                digits = sub(r'[^\d]', '', line[:end] if end > -1 else line)
+                if digits:
+                    self.exotic_fish.emerald = int(digits)
             elif line.find('Lava Fish') > -1:
                 end = line.find('<')
-                self.exotic_fish.lava = int(sub(',', '', line[:end]))
+                digits = sub(r'[^\d]', '', line[:end] if end > -1 else line)
+                if digits:
+                    self.exotic_fish.lava = int(digits)
             elif line.find('Diamond Fish') > -1:
                 end = line.find('<')
-                self.exotic_fish.diamond = int(sub(',', '', line[:end]))
+                digits = sub(r'[^\d]', '', line[:end] if end > -1 else line)
+                if digits:
+                    self.exotic_fish.diamond = int(digits)
             
             #Current inventory
             elif line.startswith('Fish Value:'):
-                value = sub('[^\d+]', '', line)
-                self.inventory_value = '${:,.2f}'.format(int(value))
+                value = sub(r'[^\d]', '', line)
+                if value:
+                    self.inventory_value = '${:,.2f}'.format(int(value))
             else:
-                try:
-                    if int(first_char):
+                if first_char.isdigit():
+                    try:
                         self.inventory.add(line)
-                except ValueError:
-                    pass
+                    except ValueError:
+                        pass
         
         self.last_update = time()
         self.inventory.last_update = self.last_update

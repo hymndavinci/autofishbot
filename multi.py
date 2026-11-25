@@ -1,15 +1,17 @@
 #! /usr/bin/env python3
 '''
-Autofishbot - multi account launcher (ONE process, ONE terminal).
+Autofishbot - multi account launcher (ONE process, ONE terminal or headless Pterodactyl console).
 
 Each account keeps its own config, gateway connection, scheduler, dispatcher
-and menu; they are shown as tabs in a single curses screen.
+and menu; in TUI mode they are shown as tabs in a single curses screen, and in
+headless/Pterodactyl mode they run cleanly with prefixed console logs.
 
 Usage:
     python multi.py                          -> every *.config inside ./configs
     python multi.py akun1.config akun2.config -> only the given files
+    python multi.py --headless               -> force headless mode
 
-Keys:
+Keys (TUI):
     Tab / Shift+Tab   next / previous account
     (everything else) the normal keybinds, applied to the account being shown
     Q                 quit ALL accounts (key follows your keybinds.json 'quit')
@@ -17,24 +19,29 @@ Keys:
 #------------------------ IMPORTS --------------------------#
 from __future__ import annotations
 
-import curses
-from os import listdir
+from os import listdir, makedirs
+from os.path import isdir
 from random import uniform
-from sys import argv
-from threading import Thread
+import sys
+from threading import Event, Thread
 from time import sleep, strftime
-from os import makedirs
 
 from app import *
-from app.menu import SafeScr, ModernUI, curses_init
 from app.notifications import NotificationManager
 from autofishbot import Receiver, Dispatcher
+from headless import (
+    HeadlessMenu,
+    configure_line_buffering,
+    run_headless_multi,
+    strip_flags,
+    wants_headless,
+)
 
 
 #------------------------- CLASSES ---------------------------#
 class Account:
     '''Everything that belongs to one account (what autofishbot.py builds in __main__).'''
-    def __init__(self, name: str, config, menu, session, receiver, scheduler, dispatcher) -> None:
+    def __init__(self, name: str, config, menu, session, receiver, scheduler, dispatcher, stop_event: Event) -> None:
         self.name = name
         self.config = config
         self.menu = menu
@@ -42,6 +49,7 @@ class Account:
         self.receiver = receiver
         self.scheduler = scheduler
         self.dispatcher = dispatcher
+        self.stop_event = stop_event
         self.error: str = ''
         self.threads: list[Thread] = [
             Thread(target=self._guard, args=('Receiver', receiver.run), daemon=True, name=f'{name}:Receiver'),
@@ -54,6 +62,8 @@ class Account:
         '''Runs a worker thread and records WHY it stopped (otherwise a dead worker is silent).'''
         try:
             fn(*args)
+            if self.stop_event.is_set():
+                return
             reason = 'finished'
         except SystemExit as e:
             reason = f'exit: {e.code}' if e.code else 'exit'
@@ -87,33 +97,41 @@ class Account:
         return ''
 
 
-def build_account(cfg_name: str) -> Account:
+def build_account(cfg_name: str, config: ConfigManager, headless: bool = False) -> Account:
     name = cfg_name[:-len('.config')] if cfg_name.endswith('.config') else cfg_name
-    config = ConfigManager(config_file=cfg_name)
-    menu = CompactMenu() if config.compact_mode else MainMenu()
+    if headless:
+        menu = HeadlessMenu(prefix=name)
+    else:
+        menu = CompactMenu() if config.compact_mode else MainMenu()
     menu.notifier = NotificationManager(config, menu)
 
     session = DiscordWrapper(config=config, menu=menu, auto_connect=True)
-    receiver = Receiver(session=session, config=config, menu=menu)
-    scheduler = Scheduler(session=session, config=config, menu=menu, captcha=receiver.captcha)
+    stop_event = Event()
+    receiver = Receiver(session=session, config=config, menu=menu, stop_event=stop_event)
+    scheduler = Scheduler(session=session, config=config, menu=menu, captcha=receiver.captcha, stop_event=stop_event)
     receiver.sch = scheduler
-    dispatcher = Dispatcher(session=session, config=config, menu=menu, sch=scheduler, rcv=receiver)
+    dispatcher = Dispatcher(
+        session=session, config=config, menu=menu, sch=scheduler, rcv=receiver, stop_event=stop_event
+    )
 
     menu.prepare(config, dispatcher, receiver.profile, scheduler)
     menu.is_alive = True
-    account = Account(name, config, menu, session, receiver, scheduler, dispatcher)
+    account = Account(name, config, menu, session, receiver, scheduler, dispatcher, stop_event)
     account.start()
     return account
 
 
-def find_configs() -> list[str]:
-    if len(argv) > 1:
-        return argv[1:]
+def find_configs(args: list[str]) -> list[str]:
+    if len(args) > 1:
+        return args[1:]
+    if not isdir('./configs'):
+        return []
     return sorted(f for f in listdir('./configs') if f.endswith('.config'))
 
 
 #------------------------- UI ---------------------------#
-def draw_tabs(scr: SafeScr, accounts: list[Account], active: int, width: int) -> None:
+def draw_tabs(scr, accounts: list[Account], active: int, width: int) -> None:
+    import curses
     x = 0
     for i, acc in enumerate(accounts):
         flag = acc.flags()
@@ -130,7 +148,10 @@ def draw_tabs(scr: SafeScr, accounts: list[Account], active: int, width: int) ->
         scr.addstr(0, width - len(hint) - 1, hint, curses.A_DIM)
 
 
-def run_ui(stdscr: curses.window, accounts: list[Account]) -> None:
+def run_ui(stdscr, accounts: list[Account]) -> None:
+    import curses
+    from app.menu import SafeScr, ModernUI, curses_init
+
     scr = SafeScr(stdscr)
     curses_init(accounts[0].menu, stdscr)
     for acc in accounts[1:]:
@@ -160,8 +181,11 @@ def run_ui(stdscr: curses.window, accounts: list[Account]) -> None:
             acc.menu.get_max_size(body)
             if acc.menu.check_dimentions():
                 for k, data in enumerate(acc.menu.minimum_info):
-                    body.addstr(max(0, (acc.menu.y // 2) + k - 1), max(0, (acc.menu.x // 2) - len(data) // 2),
-                                data[:max(1, acc.menu.x - 1)])
+                    body.addstr(
+                        max(0, (acc.menu.y // 2) + k - 1),
+                        max(0, (acc.menu.x // 2) - len(data) // 2),
+                        data[:max(1, acc.menu.x - 1)]
+                    )
             else:
                 uis[id(acc)].draw(body, isinstance(acc.menu, CompactMenu))
 
@@ -188,42 +212,108 @@ def run_ui(stdscr: curses.window, accounts: list[Account]) -> None:
 
 #------------------------ INIT --------------------------#
 if __name__ == '__main__':
-    print('\n[*] Starting (multi account)...')
-    names = find_configs()
+    headless = wants_headless(sys.argv)
+    strip_flags(sys.argv)
+    if headless:
+        configure_line_buffering()
+
+    print('\n[*] Starting (multi account)...', flush=True)
+    names = find_configs(sys.argv)
     if not names:
-        exit('[E] No .config files found in ./configs')
+        print('[E] No .config files found in ./configs', flush=True)
+        sys.exit(0 if headless else 1)
+
+    #Load configs first so duplicate tokens are filtered BEFORE connecting or starting threads,
+    #and enable debugger early if any config requests it.
+    loaded_configs: list[tuple[str, ConfigManager]] = []
+    tokens: set[str] = set()
+    for cfg_name in names:
+        try:
+            cfg = ConfigManager(config_file=cfg_name)
+        except (SystemExit, Exception) as e:
+            print(f'[E] Skipping "{cfg_name}": {e}', flush=True)
+            continue
+        if cfg.user_token in tokens:
+            print(f'[!] Skipping "{cfg_name}": same token as another config (would run one account twice).', flush=True)
+            continue
+        tokens.add(cfg.user_token)
+        loaded_configs.append((cfg_name, cfg))
+
+    if not loaded_configs:
+        print('[E] No valid account config could be loaded.', flush=True)
+        sys.exit(0 if headless else 1)
+
+    debugger.setup(any(cfg.debug for _, cfg in loaded_configs))
 
     accounts: list[Account] = []
-    tokens: set[str] = set()
-    for i, cfg_name in enumerate(names):
+    for i, (cfg_name, cfg) in enumerate(loaded_configs):
         if i:
             sleep(uniform(2, 4)) #Staggered start: accounts connect one after another
         try:
-            acc = build_account(cfg_name)
+            acc = build_account(cfg_name, cfg, headless=headless)
         except (SystemExit, Exception) as e:
-            print(f'[E] Skipping "{cfg_name}": {e}')
+            print(f'[E] Skipping "{cfg_name}": {e}', flush=True)
             continue
-        if acc.config.user_token in tokens:
-            print(f'[!] Skipping "{cfg_name}": same token as another config (would run one account twice).')
-            acc.session.disconnect()
-            continue
-        tokens.add(acc.config.user_token)
         accounts.append(acc)
-        print(f'[*] Account "{acc.name}" ready ({len(accounts)}/{len(names)}).')
+        print(f'[*] Account "{acc.name}" ready ({len(accounts)}/{len(loaded_configs)}).', flush=True)
 
     if not accounts:
-        exit('[E] No account could be started.')
+        print('[E] No account could be started.', flush=True)
+        sys.exit(0 if headless else 1)
 
-    debugger.setup(any(a.config.debug for a in accounts))
+    #Optional 2-way Telegram remote control, anti-stuck watchdog & lightweight Web Dashboard
+    from app.control import ControlHub, ManagedAccount
+    from app.telegram_remote import TelegramRemote
+    from app.watchdog import StuckWatchdog
+    from app.web_dashboard import WebDashboard
 
+    managed_accounts = [
+        ManagedAccount(
+            name=acc.name,
+            config=acc.config,
+            menu=acc.menu,
+            session=acc.session,
+            dispatcher=acc.dispatcher,
+            scheduler=acc.scheduler,
+            profile=acc.receiver.profile,
+            is_dead_fn=lambda a=acc: a.dead,
+            error_fn=lambda a=acc: a.error,
+        )
+        for acc in accounts
+    ]
+    hub = ControlHub(managed_accounts)
+    remote_stop = Event()
+    watchdog = StuckWatchdog.from_env(hub, stop_event=remote_stop)
+    if watchdog:
+        watchdog.start()
+    tg_remote = TelegramRemote.from_configs([a.config for a in accounts], hub, stop_event=remote_stop)
+    if tg_remote:
+        tg_remote.start()
+    web_dashboard = WebDashboard.from_configs([a.config for a in accounts], hub)
+    if web_dashboard:
+        web_dashboard.start()
+
+    exit_code = 0
     try:
-        curses.wrapper(run_ui, accounts)
+        if headless:
+            exit_code = run_headless_multi(accounts)
+        else:
+            import curses
+            curses.wrapper(run_ui, accounts)
     finally:
+        remote_stop.set()
+        if watchdog:
+            watchdog.stop()
+        if tg_remote:
+            tg_remote.stop()
+        if web_dashboard:
+            web_dashboard.stop()
         for acc in accounts:
+            acc.stop_event.set()
             acc.menu.kill()
         sent = False
         for acc in accounts:
-            if acc.config.fish_on_exit and acc.menu.rcv_streak > 0:
+            if acc.config.fish_on_exit and acc.menu.rcv_streak > 0 and not acc.session.fatal_close:
                 try:
                     cmd, data = acc.scheduler.commands.worker.data
                     acc.session.request(command=cmd, parameters=data)
@@ -241,4 +331,7 @@ if __name__ == '__main__':
                 pass
         for acc in accounts:
             acc.session.disconnect()
+
+    if headless:
+        sys.exit(exit_code)
     exit('\n[!] User exited.')

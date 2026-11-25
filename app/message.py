@@ -107,31 +107,33 @@ class Message:
                 self.untitled = sanitize(joined)
         return None
 
-    def build(self, extra_list: list = []) -> list:
+    def build(self, extra_list: list | None = None) -> list:
         '''Builds message list ready to be displayed.'''
-        #Todo: refactor this function
         for line in (self.description or '').split('\n'):
             final = ''
             if line.find('LEVEL UP!') > -1:
                 #Level up information
-                level = sub('[^\d+]', '', sub(r'<.+?> ', '', line))
-                final = f'<< LEVEL UP: {int(level) - 1} -> {level} >>'
+                level = sub(r'[^\d]', '', sub(r'<.+?> ', '', line))
+                if level:
+                    final = f'<< LEVEL UP: {int(level) - 1} -> {level} >>'
+                else:
+                    final = '<< LEVEL UP! >>'
             elif line.find('<:') > -1:
                 #Emotes 
                 final = sub(r'  ', ' ', sub(r'<.+?>', '', line))
             elif line.find(':') > -1:
-                #Duplicator Emote (and commom emotes)
+                #Duplicator Emote (and common emotes)
                 final = sub(r'  ', ' ', sub(r':.+?: ', '', line))
             elif line.find('#') > -1: 
                 #Global boost information
                 pass
-            elif line == '' or line == None or line == '\n':
+            elif line == '' or line is None or line == '\n':
                 pass
             else:
                 final = line
-            self.items.append(sub('[\*+]', '', final))
-        if extra_list != []:
-            self.items = extra_list + self.items
+            self.items.append(sub(r'[\*+]', '', final))
+        if extra_list:
+            self.items = list(extra_list) + self.items
         return self.items
     
     def reset(self) -> None:
